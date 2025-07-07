@@ -1,9 +1,9 @@
-name: 🚀 CI/CD: Deploy Multiple Scheduled Triggered WebJobs
+name: 🚀 WebJob CI & Deployment
 
 on:
   push:
     branches:
-      - main  # or your deployment branch
+      - main
 
 env:
   PROJECT_PATH: 'WebJob/WebJob.csproj'
@@ -11,31 +11,30 @@ env:
   BUILD_OUTPUT_DIR: '${{ github.workspace }}\WebJob\bin\Release'
   TARGET_ROOT: '${{ github.workspace }}\publish_output\app_data\jobs\triggered'
   ZIP_PATH: '${{ github.workspace }}\publish_output\webjobs.zip'
+  ARTIFACT_NAME: 'webjobs-artifact'
 
 jobs:
-  deploy-webjobs:
+  build:
+    name: 🏗️ Build WebJobs
     runs-on: windows-latest
 
     steps:
     - name: 📥 Checkout Code
       uses: actions/checkout@v4
 
-    - name: 🛠️ Setup MSBuild
+    - name: 🛠️ Setup MSBuild & NuGet
       uses: microsoft/setup-msbuild@v1.1
-
-    - name: 🛠️ Setup NuGet
-      uses: NuGet/setup-nuget@v1
 
     - name: 🔃 Restore NuGet Packages
       run: nuget restore ${{ env.PROJECT_PATH }}
 
-    - name: 🏗️ Build the WebJob Console App
+    - name: 🧱 Build WebJob
       run: |
         msbuild ${{ env.PROJECT_PATH }} `
           /p:Configuration=${{ env.CONFIGURATION }} `
           /p:OutputPath=${{ env.BUILD_OUTPUT_DIR }}
 
-    - name: 📂 Clone Job with Different Schedules
+    - name: 📂 Clone Jobs with Schedules
       shell: pwsh
       env:
         SCHEDULED_JOBS: ${{ vars.SCHEDULED_JOBS }}
@@ -43,37 +42,51 @@ jobs:
         $jobs = $env:SCHEDULED_JOBS | ConvertFrom-Json
         $baseOutput = "${{ env.BUILD_OUTPUT_DIR }}"
         $targetRoot = "${{ env.TARGET_ROOT }}"
-
         New-Item -Path $targetRoot -ItemType Directory -Force
 
         foreach ($job in $jobs) {
           $target = Join-Path $targetRoot $job.Name
           New-Item -ItemType Directory -Path $target -Force
 
-          Write-Output "📂 Creating folder for $($job.Name)..."
-
-          # Copy files
           Copy-Item "$baseOutput\*" -Destination $target -Recurse
 
-          # Add run.cmd
           $exe = Get-ChildItem "$target" -Filter "*.exe" | Select-Object -First 1
-          $runCmd = "@echo off`n$($exe.Name)"
-          Set-Content -Path (Join-Path $target "run.cmd") -Value $runCmd
-
-          # Add settings.job
+          Set-Content -Path (Join-Path $target "run.cmd") -Value "@echo off`n$($exe.Name)"
           $settings = @{ schedule = $job.Cron } | ConvertTo-Json -Depth 2
           Set-Content -Path (Join-Path $target "settings.job") -Value $settings
         }
 
-    - name: 🗜️ Zip the WebJobs folder
+    - name: 🗜️ Zip Folder
       run: |
         Compress-Archive `
           -Path "${{ github.workspace }}\publish_output\*" `
           -DestinationPath "${{ env.ZIP_PATH }}"
+
+    - name: ⬆️ Upload Artifact for Deploy
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT_NAME }}
+        path: ${{ env.ZIP_PATH }}
+
+  deploy:
+    name: 🚀 Deploy to Azure
+    needs: build
+    runs-on: [self-hosted, windows]
+
+    steps:
+    - name: ⬇️ Download Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT_NAME }}
+        path: deploy_input
+
+    - name: 📂 Check Files
+      run: |
+        dir deploy_input
 
     - name: 🚀 Deploy to Azure Web App
       uses: azure/webapps-deploy@v3
       with:
         app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        package: ${{ env.ZIP_PATH }}
+        package: deploy_input\webjobs.zip
