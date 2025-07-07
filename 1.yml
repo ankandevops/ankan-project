@@ -1,0 +1,31 @@
+- name: 📂 Clone Jobs with Parameters in run.cmd
+  shell: pwsh
+  env:
+    SCHEDULED_JOBS: ${{ vars.SCHEDULED_JOBS }}
+  run: |
+    $jobs = $env:SCHEDULED_JOBS | ConvertFrom-Json
+    $baseOutput = "${{ env.BUILD_OUTPUT_DIR }}"
+    $targetRoot = "${{ env.TARGET_ROOT }}"
+    New-Item -Path $targetRoot -ItemType Directory -Force
+
+    foreach ($job in $jobs) {
+      $jobName = $job.Name
+      $cron = $job.Cron
+      $target = Join-Path $targetRoot $jobName
+      New-Item -ItemType Directory -Path $target -Force
+
+      # Copy build output
+      Copy-Item "$baseOutput\*" -Destination $target -Recurse
+
+      # Find the EXE file
+      $exe = Get-ChildItem "$target" -Filter "*.exe" | Select-Object -First 1
+      $exeName = $exe.Name
+
+      # Generate run.cmd with the job name as parameter
+      $runCmdContent = "@echo off`n$exeName $jobName"
+      Set-Content -Path (Join-Path $target "run.cmd") -Value $runCmdContent
+
+      # Create settings.job with schedule
+      $settings = @{ schedule = $cron } | ConvertTo-Json -Depth 2
+      Set-Content -Path (Join-Path $target "settings.job") -Value $settings
+    }
