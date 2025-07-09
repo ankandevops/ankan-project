@@ -1,0 +1,86 @@
+name: 🚀 Deploy Web App + Multiple Scheduled WebJobs
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  CONFIGURATION: 'Release'
+  WEBAPP_PROJECT: 'MyWebApp/MyWebApp.csproj'
+  WEBJOB_PROJECT: 'WebJob/WebJob.csproj'
+  WEBAPP_OUTPUT: '${{ github.workspace }}\build\webapp'
+  WEBJOB_OUTPUT: '${{ github.workspace }}\build\webjob'
+  DEPLOY_PACKAGE: '${{ github.workspace }}\publish_output'
+  ZIP_PATH: '${{ github.workspace }}\webapp_with_jobs.zip'
+
+jobs:
+  build-and-deploy:
+    runs-on: windows-latest
+
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+
+    - name: 🛠 Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.1
+
+    - name: 🛠 Setup NuGet
+      uses: NuGet/setup-nuget@v1
+
+    - name: 🔃 Restore & Build Web App
+      run: |
+        nuget restore ${{ env.WEBAPP_PROJECT }}
+        msbuild ${{ env.WEBAPP_PROJECT }} `
+          /p:Configuration=${{ env.CONFIGURATION }} `
+          /p:OutputPath=${{ env.WEBAPP_OUTPUT }}
+
+    - name: 🔃 Restore & Build WebJob
+      run: |
+        nuget restore ${{ env.WEBJOB_PROJECT }}
+        msbuild ${{ env.WEBJOB_PROJECT }} `
+          /p:Configuration=${{ env.CONFIGURATION }} `
+          /p:OutputPath=${{ env.WEBJOB_OUTPUT }}
+
+    - name: 📂 Merge WebApp + WebJobs into One Package
+      shell: pwsh
+      env:
+        SCHEDULED_JOBS: ${{ vars.SCHEDULED_JOBS }}
+      run: |
+        $deployRoot = "${{ env.DEPLOY_PACKAGE }}"
+        $webAppOutput = "${{ env.WEBAPP_OUTPUT }}"
+        $webJobOutput = "${{ env.WEBJOB_OUTPUT }}"
+        $jobTargetRoot = Join-Path $deployRoot "app_data\jobs\triggered"
+
+        # Copy Web App output
+        New-Item -ItemType Directory -Force -Path $deployRoot
+        Copy-Item "$webAppOutput\*" -Destination $deployRoot -Recurse
+
+        # Create Job folders
+        $jobs = $env:SCHEDULED_JOBS | ConvertFrom-Json
+        foreach ($job in $jobs) {
+          $jobName = $job.Name
+          $cron = $job.Cron
+
+          $jobPath = Join-Path $jobTargetRoot $jobName
+          New-Item -ItemType Directory -Force -Path $jobPath
+          Copy-Item "$webJobOutput\*" -Destination $jobPath -Recurse
+
+          $exe = Get-ChildItem "$jobPath" -Filter "*.exe" | Select-Object -First 1
+          Set-Content -Path (Join-Path $jobPath "run.cmd") -Value "@echo off`n$($exe.Name) $jobName"
+          $settings = @{ schedule = $cron } | ConvertTo-Json -Depth 2
+          Set-Content -Path (Join-Path $jobPath "settings.job") -Value $settings
+        }
+
+    - name: 🗜️ Zip the Combined Package
+      run: |
+        Compress-Archive `
+          -Path "${{ env.DEPLOY_PACKAGE }}\*" `
+          -DestinationPath "${{ env.ZIP_PATH }}"
+
+    - name: 🚀 Deploy to Azure Web App
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        package: ${{ env.ZIP_PATH }}
