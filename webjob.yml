@@ -1,0 +1,86 @@
+name: 🚀 Dynamic Triggered WebJobs Deployment
+
+on:
+  workflow_dispatch:
+
+env:
+  BUILD_CONFIG: Release
+  OUTPUT_DIR: output_build
+
+jobs:
+  build:
+    name: 🛠️ Build & Package WebJobs
+    runs-on: windows-latest
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup MSBuild
+        uses: microsoft/setup-msbuild@v1.1
+
+      - name: 📦 Restore & Build
+        run: |
+          nuget restore WebJobSolution/WebJobProject.csproj
+          msbuild WebJobSolution/WebJobProject.csproj /p:Configuration=${{ env.BUILD_CONFIG }} /p:OutputPath=${{ env.OUTPUT_DIR }}
+
+      - name: 📦 Package WebJobs Dynamically
+        shell: pwsh
+        run: |
+          $jobsJson = $env:SCHEDULED_JOBS | ConvertFrom-Json
+          $paramMap = $env:JOB_PARAMETERS | ConvertFrom-Json
+
+          foreach ($job in $jobsJson) {
+              $jobName = $job.Name
+              $cron = $job.Cron
+              $param = $paramMap.$jobName
+
+              Write-Host "➡️ Packaging $jobName with param: $param and schedule: $cron"
+
+              # Create folder
+              $jobDir = "job_$jobName"
+              New-Item -ItemType Directory -Force -Path $jobDir
+
+              # Copy build output
+              Copy-Item "${{ env.OUTPUT_DIR }}\*" -Destination $jobDir -Recurse
+
+              # Create run.cmd
+              "@echo off`nWebJob.exe $param" | Out-File -FilePath "$jobDir\run.cmd" -Encoding ascii
+
+              # Create settings.job
+              $settings = @{ schedule = $cron; is_recurring = $true } | ConvertTo-Json -Depth 2
+              $settings | Out-File -FilePath "$jobDir\settings.job" -Encoding utf8
+
+              # Zip it
+              Compress-Archive -Path "$jobDir\*" -DestinationPath "$jobName.zip" -Force
+          }
+
+      - name: ⬆️ Upload WebJob Zips
+        uses: actions/upload-artifact@v4
+        with:
+          name: webjob-zips
+          path: "*.zip"
+
+  deploy:
+    name: 🚀 Deploy WebJobs to Azure
+    runs-on: windows-latest
+    needs: build
+
+    steps:
+      - name: ⬇️ Download Zips
+        uses: actions/download-artifact@v4
+        with:
+          name: webjob-zips
+
+      - name: 🔐 Azure Login (Service Principal)
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: 🚀 Deploy to Kudu API
+        shell: pwsh
+        run: |
+          $jobs = $env:SCHEDULED_JOBS | ConvertFrom-Json
+          $
