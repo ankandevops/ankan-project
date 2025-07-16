@@ -1,0 +1,98 @@
+# ---------------------------------------------
+# GitHub Actions Pipeline: WebJobs Build for QA
+# ---------------------------------------------
+# Description:
+#   - Builds a single WebJob project
+#   - Replaces App.config with App.QA.config
+#   - Generates multiple triggered jobs using environment-configured metadata
+#   - Adds parameters to run.cmd per job
+#   - Adds schedule to settings.job
+#   - Zips the result and uploads as artifact
+# ---------------------------------------------
+
+name: 📆 WebJobs Build - QA Environment
+
+on:
+  push:
+    branches:
+      - qa
+    paths:
+      - 'WebJob/**'
+
+env:
+  CONFIGURATION: 'Release'
+  WEBJOB_PROJECT: 'WebJob/WebJob.csproj'
+  WEBJOB_OUTPUT: '${{ github.workspace }}\build\webjob'
+  TEMP_FOLDER: '${{ github.workspace }}\publish_jobs'
+  ZIP_PATH: '${{ github.workspace }}\webjobs_qa_triggered.zip'
+  ARTIFACT_NAME: 'webjobs-artifact-qa'
+
+jobs:
+  build:
+    name: 🔧 Build WebJobs for QA
+    runs-on: windows-latest
+
+    steps:
+    # Step 1: Checkout source code
+    - name: 📅 Checkout Code
+      uses: actions/checkout@v4
+
+    # Step 2: Setup MSBuild and NuGet
+    - name: 🚧 Setup MSBuild & NuGet
+      uses: microsoft/setup-msbuild@v1.1
+
+    # Step 3: Restore packages and build with App.QA.config override
+    - name: 🔄 Restore & Build WebJob with QA Config
+      run: |
+        nuget restore ${{ env.WEBJOB_PROJECT }}
+        # Replace App.config with App.QA.config for QA build
+        Copy-Item -Path "WebJob\App.QA.config" -Destination "WebJob\App.config" -Force
+        msbuild ${{ env.WEBJOB_PROJECT }} `
+          /p:Configuration=${{ env.CONFIGURATION }} `
+          /p:OutputPath=${{ env.WEBJOB_OUTPUT }}
+
+    # Step 4: Prepare separate folders per WebJob using SCHEDULED_JOBS and JOB_PARAMETERS
+    - name: 🗂 Prepare Triggered WebJobs for QA
+      shell: pwsh
+      env:
+        SCHEDULED_JOBS: ${{ vars.SCHEDULED_JOBS }}
+        JOB_PARAMETERS: ${{ vars.JOB_PARAMETERS }}
+      run: |
+        $output = "${{ env.WEBJOB_OUTPUT }}"
+        $targetRoot = "${{ env.TEMP_FOLDER }}"
+        New-Item -ItemType Directory -Force -Path $targetRoot
+
+        $jobs = $env:SCHEDULED_JOBS | ConvertFrom-Json
+        $paramMap = $env:JOB_PARAMETERS | ConvertFrom-Json
+
+        foreach ($job in $jobs) {
+          $jobName = $job.Name
+          $cron = $job.Cron
+          $param = $paramMap.$jobName
+
+          $jobPath = Join-Path $targetRoot $jobName
+          New-Item -ItemType Directory -Force -Path $jobPath
+          Copy-Item "$output\*" -Destination $jobPath -Recurse
+
+          # Build run.cmd file with parameter
+          $exe = Get-ChildItem "$jobPath" -Filter "*.exe" | Select-Object -First 1
+          Set-Content -Path (Join-Path $jobPath "run.cmd") -Value "@echo off`n$($exe.Name) $param"
+
+          # Generate settings.job with CRON schedule
+          $settings = @{ schedule = $cron; is_recurring = $true } | ConvertTo-Json -Depth 2
+          Set-Content -Path (Join-Path $jobPath "settings.job") -Value $settings
+        }
+
+    # Step 5: Zip all job folders into one deployable zip file
+    - name: 📆 Zip Triggered WebJobs for QA
+      run: |
+        Compress-Archive `
+          -Path "${{ env.TEMP_FOLDER }}\*" `
+          -DestinationPath "${{ env.ZIP_PATH }}"
+
+    # Step 6: Upload the zip file as an artifact
+    - name: ⬆️ Upload Artifact (QA)
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARTIFACT_NAME }}
+        path: ${{ env.ZIP_PATH }}
