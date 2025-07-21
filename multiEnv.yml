@@ -1,0 +1,75 @@
+name: 🔁 WebJob CI/CD (Multi-Environment)
+
+on:
+  push:
+    branches:
+      - branch-dev
+      - branch-qa
+      - branch-uat
+      - master
+
+env:
+  CONFIGURATION: 'Release'
+  WEBJOB_PROJECT: 'WebJob/WebJob.csproj'
+  BUILD_OUTPUT: '${{ github.workspace }}\\build\\webjob'
+  TEMP_DIR: '${{ github.workspace }}\\publish_jobs'
+  ZIP_PATH: '${{ github.workspace }}\\webjob.zip'
+
+jobs:
+  build:
+    name: 🧱 Build WebJob
+    runs-on: windows-latest
+
+    steps:
+    - name: 📦 Checkout
+      uses: actions/checkout@v4
+
+    - name: 🛠 Setup MSBuild & NuGet
+      uses: microsoft/setup-msbuild@v1.1
+
+    - name: 🔃 Restore & Build with Environment Config
+      run: |
+        $branch = "${{ github.ref_name }}"
+        $envName = $branch.Replace("branch-", "")
+        Copy-Item -Path "WebJob\\App.$envName.config" -Destination "WebJob\\App.config" -Force
+
+        nuget restore ${{ env.WEBJOB_PROJECT }}
+
+        msbuild ${{ env.WEBJOB_PROJECT }} `
+          /p:Configuration=${{ env.CONFIGURATION }} `
+          /p:OutputPath=${{ env.BUILD_OUTPUT }}
+
+    - name: 📁 Package WebJob
+      run: |
+        Compress-Archive `
+          -Path "${{ env.BUILD_OUTPUT }}\\*" `
+          -DestinationPath "${{ env.ZIP_PATH }}"
+
+    - name: ⬆️ Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: webjob-build-${{ github.ref_name }}
+        path: ${{ env.ZIP_PATH }}
+
+  deploy:
+    name: 🚀 Deploy to ${{ github.ref_name }}
+    needs: build
+    runs-on: windows-latest
+
+    environment:
+      name: ${{ github.ref_name == 'master' && 'prod' || github.ref_name == 'branch-uat' && 'uat' || github.ref_name == 'branch-qa' && 'qa' || 'dev' }}
+      # GitHub environment settings handle approval gates
+
+    steps:
+    - name: ⬇️ Download Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: webjob-build-${{ github.ref_name }}
+        path: webjob-artifact
+
+    - name: 🔐 Deploy to Azure Web App
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+        publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE }}
+        package: webjob-artifact/webjob.zip
