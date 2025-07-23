@@ -1,0 +1,9 @@
+Subject: RMD Installation Guide Ready for Review
+
+Hi Meghna,
+
+Hope you're doing well.
+
+We have completed the RMD installation guide and it is now ready for your review. The document covers all the required steps and configurations. The only pending section is the staging environment-specific details, which we’ll be adding shortly.
+
+Looking forward to your feedback and suggestions.
