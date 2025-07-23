@@ -1,0 +1,18 @@
+Hi Team,
+
+While trying to install the runner for the RMD project on the VM, I encountered the following error during execution:
+
+csharp
+Copy
+Edit
+Invoke-WebRequest -Uri https://github.com/actions/runner/releases/latest  
+The underlying connection was closed: An unexpected error occurred on a send.
+This seems related to a network or TLS-level issue. Could you please help check:
+
+Whether TLS 1.2 is enabled on the VM?
+
+If there are any network/firewall rules blocking outbound HTTPS traffic to github.com?
+
+If the VM is behind a proxy, do we need to configure proxy settings in PowerShell?
+
+Let me know if you need any logs or further details.
