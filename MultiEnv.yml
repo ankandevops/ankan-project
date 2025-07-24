@@ -1,0 +1,84 @@
+name: 🌐 WebApp CI/CD (Multi-Environment)
+
+on:
+  push:
+    branches:
+      - branch-dev
+      - branch-qa
+      - branch-uat
+      - master
+
+jobs:
+  build:
+    name: 🏗️ Build WebApp
+    runs-on: windows-latest
+    outputs:
+      env_name: ${{ steps.set_env.outputs.env_name }}
+
+    steps:
+    - name: 📦 Checkout Code
+      uses: actions/checkout@v4
+
+    - name: 🧠 Set Environment Name from Branch
+      id: set_env
+      shell: pwsh
+      run: |
+        if ("${{ github.ref_name }}" -eq "master") {
+          echo "env_name=prod" >> $env:GITHUB_OUTPUT
+        } elseif ("${{ github.ref_name }}" -eq "branch-uat") {
+          echo "env_name=uat" >> $env:GITHUB_OUTPUT
+        } elseif ("${{ github.ref_name }}" -eq "branch-qa") {
+          echo "env_name=qa" >> $env:GITHUB_OUTPUT
+        } else {
+          echo "env_name=dev" >> $env:GITHUB_OUTPUT
+        }
+
+    - name: 📢 Print Environment Name
+      run: echo "Environment: ${{ steps.set_env.outputs.env_name }}"
+
+    - name: 💾 Set ENV_NAME Globally for Later Steps
+      run: echo "ENV_NAME=${{ steps.set_env.outputs.env_name }}" >> $env:GITHUB_ENV
+      shell: pwsh
+
+    - name: 🛠 Setup MSBuild & NuGet
+      uses: microsoft/setup-msbuild@v1.1
+
+    - name: 🔃 Restore and Build with Config Swap
+      run: |
+        nuget restore WebApp/WebApp.csproj
+        Copy-Item -Path "WebApp\\App.${{ env.ENV_NAME }}.config" -Destination "WebApp\\App.config" -Force
+        msbuild WebApp/WebApp.csproj `
+          /p:Configuration=Release `
+          /p:OutputPath=build\webapp
+      shell: pwsh
+
+    - name: 📦 Zip WebApp Artifacts
+      run: |
+        Compress-Archive -Path build\webapp\* -DestinationPath webapp.zip
+      shell: pwsh
+
+    - name: ⬆️ Upload Artifact for Deployment
+      uses: actions/upload-artifact@v4
+      with:
+        name: webapp-${{ env.ENV_NAME }}
+        path: webapp.zip
+
+  deploy:
+    name: 🚀 Deploy WebApp
+    needs: build
+    runs-on: windows-latest
+    environment:
+      name: ${{ needs.build.outputs.env_name }}
+
+    steps:
+    - name: 📦 Download Build Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: webapp-${{ needs.build.outputs.env_name }}
+        path: artifact
+
+    - name: 🔐 Deploy to Azure WebApp
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+        publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE
