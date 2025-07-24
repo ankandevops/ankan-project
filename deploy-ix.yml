@@ -1,0 +1,50 @@
+deploy:
+  name: 🚀 Deploy to ${{ matrix.env }}
+  runs-on: ${{ matrix.runner }}
+  if: github.ref == matrix.branch_or_tag
+
+  strategy:
+    matrix:
+      include:
+        - env: dev
+          branch_or_tag: refs/heads/branch-dev
+          webapp_name: webapp-dev
+          subfolder: app-dev
+          runner: windows-nonprod
+
+        - env: qa
+          branch_or_tag: refs/heads/branch-qa
+          webapp_name: webapp-qa
+          subfolder: app-qa
+          runner: windows-nonprod
+
+        - env: uat
+          branch_or_tag: refs/heads/branch-uat
+          webapp_name: webapp-uat
+          subfolder: app-uat
+          runner: windows-uat
+
+        - env: prod
+          branch_or_tag: refs/tags/release-prod
+          webapp_name: webapp-prod
+          subfolder: app-prod
+          runner: windows-prod
+
+  steps:
+    - name: 🔐 Azure Login
+      uses: azure/login@v1
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+    - name: 🚀 Deploy App
+      run: |
+        $url = "https://${{ matrix.webapp_name }}.scm.azurewebsites.net/api/zip/site/wwwroot/${{ matrix.subfolder }}"
+        $token = az account get-access-token --resource https://management.core.windows.net/ --query accessToken -o tsv
+        Invoke-RestMethod -Uri $url `
+                          -Method POST `
+                          -Headers @{ Authorization = "Bearer $token" } `
+                          -InFile "webapp.zip" `
+                          -ContentType "application/zip"
+      shell: pwsh
