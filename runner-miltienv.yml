@@ -1,0 +1,60 @@
+deploy:
+  name: 🚀 Deploy Based on Environment
+  runs-on: ${{ steps.setenv.outputs.runner }}
+
+  steps:
+    - name: 🧠 Set Environment Info
+      id: setenv
+      shell: pwsh
+      run: |
+        $ref = "${{ github.ref }}"
+        switch ($ref) {
+          'refs/heads/branch-dev' {
+            echo "env=dev" >> $env:GITHUB_OUTPUT
+            echo "webapp=webapp-dev" >> $env:GITHUB_OUTPUT
+            echo "subfolder=app-dev" >> $env:GITHUB_OUTPUT
+            echo "runner=windows-nonprod" >> $env:GITHUB_OUTPUT
+          }
+          'refs/heads/branch-qa' {
+            echo "env=qa" >> $env:GITHUB_OUTPUT
+            echo "webapp=webapp-qa" >> $env:GITHUB_OUTPUT
+            echo "subfolder=app-qa" >> $env:GITHUB_OUTPUT
+            echo "runner=windows-nonprod" >> $env:GITHUB_OUTPUT
+          }
+          'refs/heads/branch-uat' {
+            echo "env=uat" >> $env:GITHUB_OUTPUT
+            echo "webapp=webapp-uat" >> $env:GITHUB_OUTPUT
+            echo "subfolder=app-uat" >> $env:GITHUB_OUTPUT
+            echo "runner=windows-uat" >> $env:GITHUB_OUTPUT
+          }
+          'refs/tags/release-prod' {
+            echo "env=prod" >> $env:GITHUB_OUTPUT
+            echo "webapp=webapp-prod" >> $env:GITHUB_OUTPUT
+            echo "subfolder=app-prod" >> $env:GITHUB_OUTPUT
+            echo "runner=windows-prod" >> $env:GITHUB_OUTPUT
+          }
+          default {
+            Write-Host "❌ Unknown environment. Exiting."
+            exit 1
+          }
+        }
+
+    - name: 🔐 Azure Login
+      uses: azure/login@v1
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+    - name: 🚀 Deploy App to ${{ steps.setenv.outputs.env }}
+      run: |
+        $webapp = "${{ steps.setenv.outputs.webapp }}"
+        $subfolder = "${{ steps.setenv.outputs.subfolder }}"
+        $url = "https://$webapp.scm.azurewebsites.net/api/zip/site/wwwroot/$subfolder"
+        $token = az account get-access-token --resource https://management.core.windows.net/ --query accessToken -o tsv
+        Invoke-RestMethod -Uri $url `
+                          -Method POST `
+                          -Headers @{ Authorization = "Bearer $token" } `
+                          -InFile "webapp.zip" `
+                          -ContentType "application/zip"
+      shell: pwsh
