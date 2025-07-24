@@ -1,0 +1,13 @@
+jobs:
+  deploy:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        env: [dev, qa, prod]
+        include:
+          - env: dev
+            runner: ubuntu-latest
+          - env: qa
+            runner: windows-latest
+          - env: prod
+            runner: self-hosted-prod-runner
