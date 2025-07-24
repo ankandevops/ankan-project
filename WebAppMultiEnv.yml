@@ -1,0 +1,80 @@
+name: 🌐 WebApp CI/CD (Multi-Environment)
+
+on:
+  push:
+    branches:
+      - branch-dev
+      - branch-qa
+      - branch-uat
+      - master
+
+env:
+  CONFIGURATION: 'Release'
+  WEBAPP_PROJECT: 'WebApp/WebApp.csproj'
+  BUILD_OUTPUT: '${{ github.workspace }}\\build\\webapp'
+  ZIP_PATH: '${{ github.workspace }}\\webapp.zip'
+
+  # Dynamically derive environment name from branch
+  ENV_NAME: ${{ 
+    github.ref_name == 'master' && 'prod' || 
+    github.ref_name == 'branch-uat' && 'uat' || 
+    github.ref_name == 'branch-qa' && 'qa' || 
+    'dev' 
+  }}
+
+jobs:
+  build:
+    name: 🏗️ Build WebApp
+    runs-on: windows-latest
+
+    steps:
+    - name: 📦 Checkout
+      uses: actions/checkout@v4
+
+    - name: 🛠 Setup MSBuild & NuGet
+      uses: microsoft/setup-msbuild@v1.1
+
+    - name: 🔃 Restore & Build with App.{ENV_NAME}.config
+      run: |
+        nuget restore ${{ env.WEBAPP_PROJECT }}
+
+        # Overwrite App.config with the environment-specific version
+        Copy-Item -Path "WebApp\\App.${{ env.ENV_NAME }}.config" -Destination "WebApp\\App.config" -Force
+
+        msbuild ${{ env.WEBAPP_PROJECT }} `
+          /p:Configuration=${{ env.CONFIGURATION }} `
+          /p:OutputPath=${{ env.BUILD_OUTPUT }}
+
+    - name: 📦 Package WebApp
+      run: |
+        Compress-Archive `
+          -Path "${{ env.BUILD_OUTPUT }}\\*" `
+          -DestinationPath "${{ env.ZIP_PATH }}"
+
+    - name: ⬆️ Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: webapp-${{ env.ENV_NAME }}
+        path: ${{ env.ZIP_PATH }}
+
+  deploy:
+    name: 🚀 Deploy to ${{ env.ENV_NAME }}
+    needs: build
+    runs-on: windows-latest
+
+    environment:
+      name: ${{ env.ENV_NAME }}
+
+    steps:
+    - name: ⬇️ Download Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: webapp-${{ env.ENV_NAME }}
+        path: artifact
+
+    - name: 🔐 Deploy to Azure Web App
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+        publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE }}
+        package: artifact/webapp.zip
