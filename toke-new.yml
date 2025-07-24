@@ -1,0 +1,40 @@
+- name: 🚀 Deploy ZIP to Azure WebApp Subfolder
+  shell: pwsh
+  env:
+    WEBAPP_NAME: ${{ vars.WEBAPP_NAME }}
+    ACCESS_TOKEN: ${{ steps.get-token.outputs.token }}
+    ZIP_PATH: deploy-content/deploycontent.zip
+    SUBFOLDER: ps
+  run: |
+    # Read and validate values
+    $webApp = $env:WEBAPP_NAME.Trim()
+    $zipPath = $env:ZIP_PATH
+    $subfolder = $env:SUBFOLDER.Trim()
+    $token = $env:ACCESS_TOKEN
+
+    if (-not $webApp -or -not $subfolder -or -not $zipPath -or -not $token) {
+      Write-Error "❌ Missing required environment variables"
+      exit 1
+    }
+
+    $kuduBase = "https://${webApp}.scm.azurewebsites.net"
+
+    # 1️⃣ Create the subfolder via Kudu VFS API
+    $folderUrl = "$kuduBase/api/vfs/site/wwwroot/$subfolder/"
+    Write-Host "📁 Creating subfolder if not exists: $folderUrl"
+
+    Invoke-RestMethod `
+      -Uri $folderUrl `
+      -Method PUT `
+      -Headers @{ Authorization = "Bearer $token"; "Content-Length" = "0" }
+
+    # 2️⃣ Deploy the ZIP using Kudu Zip API
+    $deployUrl = "$kuduBase/api/zip/site/wwwroot/$subfolder"
+    Write-Host "🚀 Deploying ZIP to: $deployUrl"
+
+    Invoke-RestMethod `
+      -Uri $deployUrl `
+      -Method PUT `
+      -InFile $zipPath `
+      -ContentType "application/zip" `
+      -Headers @{ Authorization = "Bearer $token" }
