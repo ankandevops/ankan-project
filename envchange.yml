@@ -1,0 +1,17 @@
+- name: Partially replace values in web.config from web.dev.config
+  run: |
+    [xml]$source = Get-Content "./web.dev.config"
+    [xml]$target = Get-Content "./web.config"
+
+    foreach ($sourceSetting in $source.configuration.appSettings.add) {
+        $key = $sourceSetting.key
+        $value = $sourceSetting.value
+
+        $targetSetting = $target.configuration.appSettings.add | Where-Object { $_.key -eq $key }
+        if ($targetSetting) {
+            $targetSetting.value = $value
+        }
+    }
+
+    $target.Save("./web.config")
+  shell: pwsh
