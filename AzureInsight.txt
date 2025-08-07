@@ -1,0 +1,67 @@
+Once the deployment is successfully completed, it's critical to verify the application’s health, accessibility, and performance. This section outlines how to validate the deployment using Azure DevOps logs, application endpoints, and Azure Monitor (Application Insights).
+
+✅ 1. Azure DevOps Deployment Logs
+After running the deployment pipeline in Azure DevOps, ensure that the final deployment stage completes successfully.
+
+Navigate to your pipeline in Azure DevOps.
+
+Check the last job/stage (e.g., "Azure App Service Deploy" or "ARM Template Deployment").
+
+Look for ✓ Job succeeded confirmation.
+
+📸 Sample Screenshot:
+
+You may also include a log snippet like:
+
+nginx
+Copy
+Edit
+Deployment completed successfully. App Service URL: https://yourapp.azurewebsites.net
+✅ 2. Application Endpoint Validation
+Verify that the application is live and responsive:
+
+Access the application via the public URL:
+
+arduino
+Copy
+Edit
+https://yourapp.azurewebsites.net
+If a health check endpoint is available, validate it:
+
+arduino
+Copy
+Edit
+https://yourapp.azurewebsites.net/health
+You can also test via cURL or browser.
+
+bash
+Copy
+Edit
+curl -I https://yourapp.azurewebsites.net/health
+📸 Sample Screenshot:
+
+✅ 3. Application Insights – Live Monitoring
+If Application Insights is configured, validate real-time metrics:
+
+Navigate to your App Service in Azure Portal.
+
+Open Application Insights → Live Metrics Stream.
+
+Confirm:
+
+Incoming requests are being captured
+
+No recent failures or exceptions
+
+Average response time is within expected range
+
+📸 Sample Screenshot:
+
+Optional Kusto Query:
+
+kusto
+Copy
+Edit
+requests
+| where timestamp > ago(10m)
+| order by timestamp desc
