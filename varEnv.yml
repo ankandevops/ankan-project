@@ -1,0 +1,5 @@
+- name: Convert to uppercase (portable)
+  run: |
+    VALUE="${{ steps.set_env.outputs.env_name }}"
+    UPPER=$(echo "$VALUE" | tr '[:lower:]' '[:upper:]')
+    echo "VAR1=$UPPER" >> $GITHUB_ENV
